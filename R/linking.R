@@ -9,6 +9,7 @@
 #' acc(1:10)
 acc <- function(x)purrr::accumulate(x,`+`)
 
+
 #' Extract pairs to compare
 #'
 #' @param data_A A tbl_duckdb_connection ideally, but other varieties of tbl_lazy will probably work too
@@ -24,9 +25,9 @@ acc <- function(x)purrr::accumulate(x,`+`)
 #' @export
 extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variables){
   data_A <- data_A |>
-    rename_with(\(x)glue::glue("{x}_left"))
+    add_suffix('_left')
   data_B <- data_B |>
-    rename_with(\(x)glue::glue("{x}_right"))
+    add_suffix('_right')
   blocking_vars_right <- blocking_variables
   blocking_vars_left <- names(blocking_variables)
   pass_specs <- map(blocking_variables,\(vars){
@@ -44,7 +45,10 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
 
 #' Calculate fellegi-sunter weights
 #'
+#' For now this only understands exact matches
+#'
 #' @param data_A
 #' @param data_B
+#' @param comparison_spec - a nested list specifying the comparisons to make
 #'
-#' @param exact_
+#'
