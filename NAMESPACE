@@ -2,6 +2,7 @@
 
 export(acc)
 export(extract_blocks)
+importFrom(dplyr,if_else)
 importFrom(dplyr,inner_join)
 importFrom(dplyr,rename_with)
 importFrom(dplyr,union)
@@ -9,3 +10,4 @@ importFrom(glue,glue)
 importFrom(purrr,map)
 importFrom(purrr,reduce)
 importFrom(rlang,set_names)
+importFrom(stringr,str_ends)
