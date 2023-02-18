@@ -17,18 +17,34 @@ acc <- function(x)purrr::accumulate(x,`+`)
 #' Eventually this should support other types of blocking, like blocking using common prefixes
 #' @return A lazy tbl_duckdb_connection which contains the comparisons that we want to make.
 #'
+#' @importFrom glue glue
+#' @importFrom purrr map reduce
+#' @importFrom dplyr inner_join rename_with union
+#' @importFrom rlang set_names
 #' @export
-extract_blocks <- function(data_A,data_B,blocking_variables){
-  #lifted_join_by <- purrr::lift(dplyr::join_by)#a version of join_by that can take a vector rather than dots
-  passes <- purrr::map(blocking_variables,\(x)dplyr::inner_join(data_A,data_B,x,suffix=c('_left','_right')))
-  ## the next bit is horrible and needed only because the keep argument of inner_join is not supported by inner_join.tbl_lazy
-  passes <- purrr::map2(passes,blocking_variables,\(x,y){
-    bind_cols(x,
-    purrr::map(y,\(z){
-      transmute(x,"{z}_left" := .data[[z]],"{z}_right" := .data[[z]]) #|> ## see https://rlang.r-lib.org/reference/glue-operators.html
-    }) |>
-      reduce(bind_cols)
-  )})
-  all_comparison_pairs <- purrr::reduce(passes,dplyr::union)
-  all_comparison_pairs
+extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variables){
+  data_A <- data_A |>
+    rename_with(\(x)glue::glue("{x}_left"))
+  data_B <- data_B |>
+    rename_with(\(x)glue::glue("{x}_right"))
+  blocking_vars_right <- blocking_variables
+  blocking_vars_left <- names(blocking_variables)
+  pass_specs <- map(blocking_variables,\(vars){
+    glue("{vars}_right") |>
+    set_names(glue("{vars}_left"))})
+  passes <- map(pass_specs,\(pass_spec){
+    res <- inner_join(data_A,data_B,pass_spec,suffix=c('_left','_right'))
+  })
+  unique_id_A <- glue("{unique_id_A}_left")
+  unique_id_B <- glue("{unique_id_B}_right")
+  passes |>
+    map(\(x)distinct(x,.data[[unique_id_A]],.data[[unique_id_B]])) |>
+    reduce(union)
 }
+
+#' Calculate fellegi-sunter weights
+#'
+#' @param data_A
+#' @param data_B
+#'
+#' @param exact_
