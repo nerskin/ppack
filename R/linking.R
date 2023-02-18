@@ -65,5 +65,5 @@ compute_weights <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_spe
     left_join(data_B,by=unique_id_B)
 
   ## actually use this tbl_lazy to compute the weights - will require some metaprogramming unless it can be done withing the "programming with dplyr" framework
-
+  joined_data
 }
