@@ -47,8 +47,23 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
 #'
 #' For now this only understands exact matches
 #'
-#' @param data_A
-#' @param data_B
-#' @param comparison_spec - a nested list specifying the comparisons to make
-#'
-#'
+#' @param data_A some sort of data frame or tbl_lazy etc
+#' @param data_B some sort of data frame or tbl_lazy etc
+#' @param unique_id_A The unique id column for the first dataset
+#' @param unique_id_B The unique id column for the second dataset
+#' @param comparison_spec  liable to change, some specification of the comparisons to make
+#' @param comparison_ids the ids to compare. This will usually be output from extract_blocks
+#' @export
+compute_weights <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_spec,comparison_ids){
+  data_A <- add_suffix(data_A,"_left")
+  data_B <- add_suffix(data_B,"_right")
+  unique_id_A <- add_suffix_char(unique_id_A,'_left')
+  unique_id_B <- add_suffix_char(unique_id_B,'_right')
+
+  joined_data <- comparison_ids |>
+    left_join(data_A,by=unique_id_A) |>
+    left_join(data_B,by=unique_id_B)
+
+  ## actually use this tbl_lazy to compute the weights - will require some metaprogramming unless it can be done withing the "programming with dplyr" framework
+
+}
