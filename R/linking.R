@@ -104,7 +104,7 @@ do_comparisons <- function(joined_data,expr_list){
 
 #' @importFrom rlang eval_tidy
 #' @export
-run_em <- function(pattern_counts,maxiter=10){
+run_em <- function(pattern_counts,maxiter=10,total_pairs){
   ## some calculations are underflowing - should maybe calculate weights and then convert to probabilities?
   comparison_names <- names(pattern_counts) |>
     keep(\(x)x!='n')
@@ -115,50 +115,62 @@ run_em <- function(pattern_counts,maxiter=10){
 
   m_probabilities <- comparison_levels |>
     map(\(x) seq(0.1,0.8,length=length(x)))
+  log_m_probs <- m_probabilities |>
+    map(log)
   u_probabilities <- comparison_levels |>
     map(\(x)rep(0.1,length(x)))
+  log_u_probs <- u_probabilities |>
+    map(log)
 
-  lambda_est <- 1e-7
+  lambda <- 1e-7
+  log_lambda <- log(lambda)
+  log_one_minus_lambda <- log(1-lambda)
 
-  total_pairs <- pattern_counts |> summarise(total_pairs = sum(n)) |> pull(total_pairs)
 
   for (i in seq_len(maxiter)){
     ## build up expressions to use in computing the match probabilities
-    likelihood_given_m <- map(comparison_names,\(x){
+    loglik_given_m <- map(comparison_names,\(x){
       name_sym <- sym(x)
-      m_probability <- expr( if (!is.na(!!name_sym))m_probabilities[[!!x]][!!name_sym + 1] else 1)
+      m_probability <- expr( if (!is.na(!!name_sym))log(m_probabilities[[!!x]][!!name_sym + 1]) else 0)
     }) |>
-      reduce(\(x,y) expr(!!x * !!y))
-    likelihood_given_u <- map(comparison_names,\(x){
+      reduce(\(x,y) expr(!!x + !!y))
+    loglik_given_u <- map(comparison_names,\(x){
       name_sym <- sym(x)
-      u_probability <- expr(if (!is.na(!!name_sym)) u_probabilities[[!!x]][!!name_sym + 1] else 1)
+      u_probability <- expr(if (!is.na(!!name_sym)) log(u_probabilities[[!!x]][!!name_sym + 1]) else 0)
     }) |>
-      reduce(\(x,y)expr(!!x * !!y))
+      reduce(\(x,y)expr(!!x + !!y))
   pattern_counts <- pattern_counts |>
     rowwise() |>
-    mutate(likelihood_given_m = !!likelihood_given_m,likelihood_given_u = !!likelihood_given_u,probability_est = lambda_est * likelihood_given_m/(lambda_est*likelihood_given_m + (1-lambda_est)*likelihood_given_u))
+    mutate(loglik_given_m = !!loglik_given_m,
+           loglik_given_u = !!loglik_given_u,
+	   log_probability_est = log_lambda + loglik_given_m - log_sum_exp(c(log_lambda + loglik_given_m, log_one_minus_lambda + loglik_given_u)), ##fix the denominator
+      prob_est = exp(log_probability_est))
 
   #this next term is the denominator of the update term on page 2 of the supp. materials
   # we only need to compute it once per iteration
-  expected_total_matches <- sum(pattern_counts[['n']]*pattern_counts[['probability_est']])
-  expected_total_nonmatches <- sum(pattern_counts[['n']] * (1 - pattern_counts[['probability_est']]))
-  lambda_est <- expected_total_matches/total_pairs
+  expected_total_matches <- sum(pattern_counts[['n']]*pattern_counts[['prob_est']])
+  expected_total_nonmatches <- sum(pattern_counts[['n']] * (1 - pattern_counts[['prob_est']]))
+  lambda <- expected_total_matches/total_pairs
+  log_lambda <- log(expected_total_matches) - log(total_pairs)
   #update each m and u probability
   m_probabilities_old <- m_probabilities
   u_probabilities_old <- u_probabilities
   for (name in comparison_names){
     non_missing_indices <- which(!is.na(pattern_counts[[name]]))
+    pattern_counts_temp <- pattern_counts[non_missing_indices,]
     for (l in seq_along(m_probabilities[[name]])  ){
-      m_probabilities[[name]][l] <- sum((pattern_counts[['n']][non_missing_indices]*(pattern_counts[[name]] == l-1)[non_missing_indices]*pattern_counts[['probability_est']][non_missing_indices]))/sum(pattern_counts[['n']][non_missing_indices]*pattern_counts[['probability_est']][non_missing_indices])
+      m_probabilities[[name]][l] <- sum((pattern_counts_temp[['n']]*(pattern_counts_temp[[name]] == l-1)*pattern_counts_temp[['prob_est']]))/sum(pattern_counts_temp[['n']]*pattern_counts_temp[['prob_est']])
     }
     for (l in seq_along(u_probabilities[[name]]) ){
-     u_probabilities[[name]][l] <- sum((pattern_counts[['n']][non_missing_indices]*(pattern_counts[[name]] == l-1)[non_missing_indices]*(1-pattern_counts[['probability_est']])[non_missing_indices]))/sum(pattern_counts[['n']][non_missing_indices] * (1 - pattern_counts[['probability_est']][non_missing_indices]))
+     u_probabilities[[name]][l] <- sum((pattern_counts_temp[['n']]*(pattern_counts_temp[[name]] == l-1)*(1-pattern_counts_temp[['prob_est']])))/sum(pattern_counts_temp[['n']] * (1 - pattern_counts_temp[['prob_est']]))
     }
   }
+  print(glue("This is iteration number {i}"))
   print(glue("The largest change in an m probability was {max(unlist(m_probabilities) - unlist(m_probabilities_old))}"))
   print(glue("The largest change in a u probability was {max(unlist(u_probabilities) - unlist(u_probabilities_old))}"))
+  print(glue("The current value of lambda is {lambda}\n"))
   }
-  list(pattern_counts=pattern_counts,m_probabilities=m_probabilities,u_probabilities=u_probabilities,lambda_est=lambda_est,total_pairs=total_pairs)
+  list(pattern_counts=pattern_counts,m_probabilities=m_probabilities,u_probabilities=u_probabilities,lambda=lambda,total_pairs=total_pairs)
   ## basically two steps: for each agreement pattern, calculate the running estimate of the match probability
   ## then update each of the parameters
 }
