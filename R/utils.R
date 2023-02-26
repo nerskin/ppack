@@ -25,3 +25,11 @@ add_suffix_char <- function(vec,suffix){
   if_else(str_ends(vec,suffix),vec,glue("{vec}{suffix}")) |>
     as.character()
 }
+
+
+#' Use the trick descripted at https://gregorygundersen.com/blog/2020/02/09/log-sum-exp/ to compute log(sum(exp(x))) in a numerically stable way
+#' @param x a vector of numbers to compute the LSE of
+#' @export
+log_sum_exp <- function(x){
+  max(x) + log(sum(exp(x - max(x))))
+}
