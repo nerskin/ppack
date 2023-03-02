@@ -46,9 +46,9 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
     distinct(.data[[unique_id_A]],.data[[unique_id_B]])
   }
 
-#' Calculate fellegi-sunter weights
+#' Bring together all the variables in a single table
 #'
-#' For now this only understands exact matches
+#'
 #'
 #' @param data_A some sort of data frame or tbl_lazy etc
 #' @param data_B some sort of data frame or tbl_lazy etc
@@ -57,7 +57,7 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
 #' @param comparison_spec  liable to change, some specification of the comparisons to make
 #' @param comparison_ids the ids to compare. This will usually be output from extract_blocks
 #' @export
-compute_weights <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_spec,comparison_exprs,comparison_ids){
+compute_pairs_dataset <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_ids){
   data_A <- add_suffix(data_A,"_left")
   data_B <- add_suffix(data_B,"_right")
   unique_id_A <- add_suffix_char(unique_id_A,'_left')
@@ -66,23 +66,6 @@ compute_weights <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_spe
   joined_data <- comparison_ids |>
     left_join(data_A,by=unique_id_A) |>
     left_join(data_B,by=unique_id_B)
-
-  vars_left <- names(comparison_spec) |>
-    add_suffix_char('_left') |>
-    syms()
-  vars_right <- comparison_spec |>
-    add_suffix_char('_right') |>
-    syms()
-
-  m_probs <- rep(0.9,length(vars_left))
-  u_probs <- rep(0.1,length(vars_right))
-  weight_expression <- pmap(list(vars_left,vars_right,m_probs,u_probs),\(a,b,c,d){
-    expr(ifelse(!!a == !!b,log(!!c/!!d),log((1-!!c)/(1-!!d))))
-  }) |>
-    reduce(\(x,y)expr(!!x + !!y))
-
-  mutate(joined_data,weight=!!weight_expression) |>
-    select(all_of(c(unique_id_A,unique_id_B,'weight')))
   ## actually use this tbl_lazy to compute the weights - will require some metaprogramming unless it can be done withing the "programming with dplyr" framework
 
   joined_data
@@ -104,7 +87,7 @@ do_comparisons <- function(joined_data,expr_list){
 
 #' @importFrom rlang eval_tidy
 #' @export
-run_em <- function(pattern_counts,maxiter=10,total_pairs){
+run_em <- function(pattern_counts,maxiter=10,total_pairs,u_probabilities = NULL){
   ## some calculations are underflowing - should maybe calculate weights and then convert to probabilities?
   comparison_names <- names(pattern_counts) |>
     keep(\(x)x!='n')
@@ -114,11 +97,9 @@ run_em <- function(pattern_counts,maxiter=10,total_pairs){
         map(\(x)sort(x))
 
   m_probabilities <- comparison_levels |>
-    map(\(x) seq(0.1,0.8,length=length(x)))
+    map(\(x) seq(0.1,0.8,length=length(x)) |> set_names(names(x)))
   log_m_probs <- m_probabilities |>
     map(log)
-  u_probabilities <- comparison_levels |>
-    map(\(x)rep(0.1,length(x)))
   log_u_probs <- u_probabilities |>
     map(log)
 
@@ -131,12 +112,12 @@ run_em <- function(pattern_counts,maxiter=10,total_pairs){
     ## build up expressions to use in computing the match probabilities
     loglik_given_m <- map(comparison_names,\(x){
       name_sym <- sym(x)
-      m_probability <- expr( if (!is.na(!!name_sym))log(m_probabilities[[!!x]][!!name_sym + 1]) else 0)
+      m_probability <- expr( if (!is.na(!!name_sym))log(m_probabilities[[!!x]][!!name_sym]) else 0)
     }) |>
       reduce(\(x,y) expr(!!x + !!y))
     loglik_given_u <- map(comparison_names,\(x){
       name_sym <- sym(x)
-      u_probability <- expr(if (!is.na(!!name_sym)) log(u_probabilities[[!!x]][!!name_sym + 1]) else 0)
+      u_probability <- expr(if (!is.na(!!name_sym)) log(u_probabilities[[!!x]][!!name_sym]) else 0)
     }) |>
       reduce(\(x,y)expr(!!x + !!y))
   pattern_counts <- pattern_counts |>
@@ -158,11 +139,11 @@ run_em <- function(pattern_counts,maxiter=10,total_pairs){
   for (name in comparison_names){
     non_missing_indices <- which(!is.na(pattern_counts[[name]]))
     pattern_counts_temp <- pattern_counts[non_missing_indices,]
-    for (l in seq_along(m_probabilities[[name]])  ){
-      m_probabilities[[name]][l] <- sum((pattern_counts_temp[['n']]*(pattern_counts_temp[[name]] == l-1)*pattern_counts_temp[['prob_est']]))/sum(pattern_counts_temp[['n']]*pattern_counts_temp[['prob_est']])
+    for (l in names(m_probabilities[[name]])  ){
+      m_probabilities[[name]][l] <- sum((pattern_counts_temp[['n']]*(pattern_counts_temp[[name]] == l)*pattern_counts_temp[['prob_est']]))/sum(pattern_counts_temp[['n']]*pattern_counts_temp[['prob_est']])
     }
-    for (l in seq_along(u_probabilities[[name]]) ){
-     u_probabilities[[name]][l] <- sum((pattern_counts_temp[['n']]*(pattern_counts_temp[[name]] == l-1)*(1-pattern_counts_temp[['prob_est']])))/sum(pattern_counts_temp[['n']] * (1 - pattern_counts_temp[['prob_est']]))
+    for (l in u_probabilities[[name]]){
+     u_probabilities[[name]][l] <- sum((pattern_counts_temp[['n']]*(pattern_counts_temp[[name]] == l)*(1-pattern_counts_temp[['prob_est']])))/sum(pattern_counts_temp[['n']] * (1 - pattern_counts_temp[['prob_est']]))
     }
   }
   print(glue("This is iteration number {i}"))
@@ -170,7 +151,18 @@ run_em <- function(pattern_counts,maxiter=10,total_pairs){
   print(glue("The largest change in a u probability was {max(unlist(u_probabilities) - unlist(u_probabilities_old))}"))
   print(glue("The current value of lambda is {lambda}\n"))
   }
-  list(pattern_counts=pattern_counts,m_probabilities=m_probabilities,u_probabilities=u_probabilities,lambda=lambda,total_pairs=total_pairs)
+
+  ## ensure the two lists have the same ordering
+  m_probabilities <- m_probabilities[order(names(m_probabilities))]
+  u_probabilities <- u_probabilities[order(names(u_probabilities))]
+
+  m_probabilities <- map(m_probabilities,\(x) x[order(names(x))])
+  u_probabilities <- map(u_probabilities,\(x) x[order(names(x))])
+
+  ## calculate Fellegi-Sunter weights
+  weights <- map2(m_probabilities,u_probabilities,\(x,y)log(x) - log(y))
+
+  list(pattern_counts=pattern_counts,m_probabilities=m_probabilities,u_probabilities=u_probabilities,lambda=lambda,total_pairs=total_pairs,weights=weights)
   ## basically two steps: for each agreement pattern, calculate the running estimate of the match probability
   ## then update each of the parameters
 }
