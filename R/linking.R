@@ -23,7 +23,7 @@ acc <- function(x)purrr::accumulate(x,`+`)
 #' @importFrom dplyr inner_join rename_with union
 #' @importFrom rlang set_names
 #' @export
-extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variables){
+extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variables,blocking_expressions){
   data_A <- data_A |>
     add_suffix('_left')
   data_B <- data_B |>
@@ -37,6 +37,9 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
   passes <- map(pass_specs,\(pass_spec){
     res <- inner_join(data_A,data_B,pass_spec,suffix=c('_left','_right'))
   })
+  cartesian_product <- inner_join(data_A,data_B,suffix=c('_left','_right'),by=character())
+  expression_passes <- map(blocking_expressions,\(x)filter(cartesian_product,!!x))
+  passes <- c(passes,expression_passes)
   unique_id_A <- glue("{unique_id_A}_left")
   unique_id_B <- glue("{unique_id_B}_right")
   passes |>
