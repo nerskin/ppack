@@ -9,20 +9,22 @@ document()
 unlink('scratch.duckdb')
 unlink('scratch.sl3')
 con <- dbConnect(duckdb(),"scratch.duckdb")
-dbExecute(con,"pragma memory_limit='4GB';")
+dbExecute(con,"pragma memory_limit='1GB';")
 
 con_sqlite <- dbConnect(SQLite(),'scratch.sl3')
 
-RSQLite:::extension_load(con_sqlite@ptr,'distlib/distlib_64.so','sqlite3_distlib_init')
+#RSQLite:::extension_load(con_sqlite@ptr,'distlib/distlib_64.so','sqlite3_distlib_init')
 
 copy_to(con,historical_figures)
 
 historical_db <- tbl(con,'historical_figures') |>
   mutate(unique_id = row_number())
 
-passes <- list('surname'='surname','dob'='dob','postcode_fake'='postcode_fake','first_names'='first_name',c('occupation','gender'))
+passes <- list('surname'='surname','dob'='dob','postcode_fake'='postcode_fake','first_names'='first_name',c('occupation'))
 
-comparison_ids <- extract_blocks(historical_db,historical_db,'unique_id','unique_id',passes) %>%
+expression_passes <- list(expr(substr(surname_left,1,1) == substr(surname_right,1,1) & substr(first_name_left,1,1) == substr(first_name_right,1,1)))
+
+comparison_ids <- extract_blocks(historical_db,historical_db,'unique_id','unique_id',passes,expression_passes) %>%
   filter(unique_id_left < unique_id_right) %>%
   copy_to(con,.)
 
@@ -103,25 +105,54 @@ run_em(pattern_counts,maxiter=20,u_probabilities = u_probs,total_pairs = total_p
 
 attach(em_results)
 
+comparison_values <- res |>
+  transmute(unique_id_left,unique_id_right,!!!comparator_expressions)
 
-weights_df <- tibble(variable = names(weights),val = weights) |>
-  mutate(val = map(val,\(x) tibble(level=names(x),weight=x))) |>
-  unnest(cols=c(val))
+dict_lookup_case_when <- function(vec,var){
+  var <- enexpr(var)
+  case_when_conditions <- map2(vec,names(vec),\(x,y) expr(!!var == !!y ~ !!x))
+  case_when_conditions <- c(case_when_conditions,expr(TRUE ~ NA))
+  names(case_when_conditions) <- NULL
+  expr(case_when(!!!case_when_conditions))
+}
 
-weights_df <- copy_to(dest=res$src,df=weights_df,overwrite=TRUE)
+comparator_names <- names(comparator_expressions)
+output_weight_names <- glue("{comparator_names}_weight")
+weight_expression <- map(comparator_names,\(x){
+  m_probability <- dict_lookup_case_when(m_probabilities[[x]],!!sym(x))
+  u_probability <- dict_lookup_case_when(u_probabilities[[x]],!!sym(x))
+  expr(if_else(!is.na(!!sym(x)),log(!!m_probability/!!u_probability),0))
+}) |>
+  reduce(\(x,y)expr(!!x + !!y))
 
-comparisons_wide <- res |>
-  transmute(unique_id_left,unique_id_right,!!!comparator_expressions) |>
-  compute()
 
-comparisons_long <- comparisons_wide |>
-  pivot_longer(cols = -starts_with('unique_id'),names_to='variable',values_to = 'level') |>
-  compute()
 
-comparisons_long |>
-  left_join(weights_df,by=c('variable','level')) |>
-  mutate(weight = if_else(!is.na(weight),weight,0)) |>
-  group_by(unique_id_left,unique_id_right) |>
-  summarise(weight=sum(weight)) |>
-  ungroup() |>
-  filter(weight > 0)
+comparison_values |>
+  mutate(weight=!!weight_expression) |>
+  filter(weight > 5) |>
+  left_join(select(historical_db,unique_id,cluster),by=c('unique_id_left'='unique_id')) |>
+  left_join(select(historical_db,unique_id,cluster),by=c('unique_id_right'='unique_id')) |>
+  mutate(true_match = cluster.x == cluster.y) |>
+  arrange(desc(weight)) |>
+  collect() -> results
+
+glm(results,formula = true_match ~ weight,family=binomial())
+
+results |> mutate(weight = round(weight)) |> group_by(weight) |> summarise(true_match=mean(true_match)) |> ggplot(aes(weight,true_match)) + geom_point()
+
+
+options(arrow.skip_nul = TRUE)
+open_dataset('../NCVR_2021.txt',format='tsv') |>
+  select(first_name,last_name,midl_name,sex,house_num,street_name,unit_num,state_cd,phone_num,race_code,ethnic_code,party_desc,age,municipality_desc,ward_desc,cong_dist_desc,NC_senate_desc,NC_house_desc,township_desc,age_group,voter_reg_num,ncid) |>
+  group_by(municipality_desc) |>
+  write_dataset(path='ncvr_2021')
+
+open_dataset('../NCVR_2023.txt',format='tsv') |>
+  select(first_name,last_name,midl_name,sex,house_num,street_name,unit_num,state_cd,phone_num,race_code,ethnic_code,party_desc,age,municipality_desc,ward_desc,cong_dist_desc,NC_senate_desc,NC_house_desc,township_desc,age_group,voter_reg_num,ncid) |>
+  group_by(municipality_desc) |>
+  write_dataset(path='ncvr_2023')
+
+ncvr_2021 <- open_dataset('ncvr_2021')
+
+dbExecute(con,"create table ncvr_2021 as select * from read_parquet('ncvr_2021/*/*.parquet')")
+dbExecute(con,"create table ncvr_2023 as select * from read_parquet('ncvr_2023/*/*.parquet')")
