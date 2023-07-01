@@ -99,8 +99,6 @@ calculate_u_probs <- function(con,data_A,data_B,comparator_expressions,size=1e6)
 
 u_probs <- calculate_u_probs(con,historical_db,historical_db,comparator_expressions=comparator_expressions,size=1e6)
 
-document()
-load_all()
 run_em(pattern_counts,maxiter=20,u_probabilities = u_probs,total_pairs = total_pairs) -> em_results
 
 attach(em_results)
