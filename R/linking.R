@@ -1,15 +1,3 @@
-#' Simple test function
-#'
-#' @param x A vector of numbers to get the cumulative sums of
-#'
-#' @return A vector of the cumulative sums of the input
-#' @export
-#'
-#' @examples
-#' acc(1:10)
-acc <- function(x)purrr::accumulate(x,`+`)
-
-
 #' Extract pairs to compare
 #'
 #' @param data_A A tbl_duckdb_connection ideally, but other varieties of tbl_lazy will probably work too
@@ -51,8 +39,6 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
 
 #' Bring together all the variables in a single table
 #'
-#'
-#'
 #' @param data_A some sort of data frame or tbl_lazy etc
 #' @param data_B some sort of data frame or tbl_lazy etc
 #' @param unique_id_A The unique id column for the first dataset
@@ -69,7 +55,6 @@ compute_pairs_dataset <- function(data_A,data_B,unique_id_A,unique_id_B,comparis
   joined_data <- comparison_ids |>
     left_join(data_A,by=unique_id_A) |>
     left_join(data_B,by=unique_id_B)
-  ## actually use this tbl_lazy to compute the weights - will require some metaprogramming unless it can be done withing the "programming with dplyr" framework
 
   joined_data
 }
