@@ -46,7 +46,7 @@ extract_blocks <- function(data_A,data_B,unique_id_A,unique_id_B,blocking_variab
 #' @param comparison_spec  liable to change, some specification of the comparisons to make
 #' @param comparison_ids the ids to compare. This will usually be output from extract_blocks
 #' @export
-compute_pairs_dataset <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_ids){
+compute_blocked_dataset <- function(data_A,data_B,unique_id_A,unique_id_B,comparison_ids){
   data_A <- add_suffix(data_A,"_left")
   data_B <- add_suffix(data_B,"_right")
   unique_id_A <- add_suffix_char(unique_id_A,'_left')
@@ -55,7 +55,7 @@ compute_pairs_dataset <- function(data_A,data_B,unique_id_A,unique_id_B,comparis
   joined_data <- comparison_ids |>
     left_join(data_A,by=unique_id_A) |>
     left_join(data_B,by=unique_id_B)
-
+  
   joined_data
 }
 
